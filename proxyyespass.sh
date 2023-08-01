@@ -61,7 +61,7 @@ EOF
 
 gen_data() {
     seq $FIRST_PORT $LAST_PORT | while read port; do
-        echo "muaxu.vn$port/$(random)/$IP4/$port/$(gen64 $IP6)"
+        echo "ipduyanvnAnhquyen123$port/$(random)/$IP4/$port/$(gen64 $IP6)"
     done
 }
 
