@@ -64,7 +64,7 @@ EOF
 
 gen_data() {
     seq $FIRST_PORT $LAST_PORT | while read port; do
-        echo "proxy$port/$(random)/$IP4/$port/$(gen64 $IP6)"
+        echo "muaxu$port/$(random)/$IP4/$port/$(gen64 $IP6)"
     done
 }
 
