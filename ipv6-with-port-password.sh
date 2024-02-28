@@ -64,7 +64,7 @@ EOF
 
 gen_data() {
     seq $FIRST_PORT $LAST_PORT | while read port; do
-        echo "muaxu$port/$(random)/$IP4/$port/$(gen64 $IP6)"
+        echo "port$port/$(random)/$IP4/$port/$(gen64 $IP6)"
     done
 }
 
@@ -112,7 +112,7 @@ while :; do
     echo "Number out of range, try again"
   fi
 done
-LAST_PORT=$(($FIRST_PORT + 1999))
+LAST_PORT=$(($FIRST_PORT + 999))
 echo "LAST_PORT is $LAST_PORT. Continue..."
 
 gen_data >$WORKDIR/data.txt
