@@ -11,7 +11,6 @@ IPV6ADDR=$IPV6ADDR/64
 IPV6_DEFAULTGW=$IPV6_DEFAULTGW" >> /etc/sysconfig/network-scripts/ifcfg-eth0
 service network restart
 
-# Phần còn lại của script
 #!/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
@@ -101,15 +100,10 @@ cat << EOF > /etc/rc.d/rc.local
 touch /var/lock/subsys/local
 EOF
 
-#!/bin/sh
-
 echo "installing apps"
 yum -y install wget gcc net-tools bsdtar zip >/dev/null
 
-cat << EOF > /etc/rc.d/rc.local
-#!/bin/bash
-touch /var/lock/subsys/local
-EOF
+install_3proxy
 
 echo "working folder = /home/duyanmmo"
 WORKDIR="/home/duyanmmo"
@@ -119,7 +113,7 @@ mkdir $WORKDIR && cd $_
 IP4=$(curl -4 -s icanhazip.com)
 IP6=$(curl -6 -s icanhazip.com | cut -f1-4 -d':')
 
-echo "Internal ip = ${IP4}. External sub for ip6 = ${IP6}"
+echo "Internal ip = ${IP4}. Exteranl sub for ip6 = ${IP6}"
 
 while :; do
   read -p "Enter FIRST_PORT between 10000 and 60000: " FIRST_PORT
@@ -131,9 +125,7 @@ while :; do
     echo "Number out of range, try again"
   fi
 done
-
-read -p "Enter the quantity of ports you want to create: " QUANTITY_OF_PORTS
-LAST_PORT=$(($FIRST_PORT + $QUANTITY_OF_PORTS - 1))
+LAST_PORT=$(($FIRST_PORT + 999))
 echo "LAST_PORT is $LAST_PORT. Continue..."
 
 gen_data >$WORKDIR/data.txt
@@ -149,7 +141,6 @@ bash ${WORKDIR}/boot_ifconfig.sh
 ulimit -n 1000048
 /usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg
 EOF
-
 chmod 0755 /etc/rc.local
 bash /etc/rc.local
 
