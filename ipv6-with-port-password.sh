@@ -112,7 +112,7 @@ while :; do
     echo "Number out of range, try again"
   fi
 done
-LAST_PORT=$(($FIRST_PORT + 999))
+LAST_PORT=$(($FIRST_PORT + 1999))
 echo "LAST_PORT is $LAST_PORT. Continue..."
 
 gen_data >$WORKDIR/data.txt
