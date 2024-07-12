@@ -72,8 +72,8 @@ echo "installing apps"
 
 install_3proxy
 
-echo "working folder = /home/bkns"
-WORKDIR="/home/bkns"
+echo "working folder = /home/duyanmmo"
+WORKDIR="/home/duyanmmo"
 WORKDATA="${WORKDIR}/data.txt"
 mkdir -p $WORKDIR && cd $WORKDIR
 
