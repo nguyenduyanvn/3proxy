@@ -1,46 +1,64 @@
 #!/bin/bash
-
-# Ask for the range of ports to use
-echo "Please enter the start port:"
-read START_PORT
-echo "Please enter the end port:"
-read END_PORT
-
-# Calculate the total number of ports
-TOTAL_PORTS=$((END_PORT - START_PORT + 1)) 
-
-# Ask for the total number of proxies to generate
-echo "Please enter the total number of proxies to generate:"
-read NUM_PROXIES
-
-# If the user wants to generate more proxies than available ports, print an error message and exit
-if (( NUM_PROXIES > TOTAL_PORTS )); then
-  echo "Error: You are trying to generate more proxies than the total available ports. Please try again."
-  exit 1
+YUM=$(which yum)
+#####
+if [ "$YUM" ]; then
+echo > /etc/sysctl.conf
+##
+tee -a /etc/sysctl.conf <<EOF
+net.ipv6.conf.default.disable_ipv6 = 0
+net.ipv6.conf.all.disable_ipv6 = 0
+EOF
+##
+sysctl -p
+IPC=$(curl -4 -s icanhazip.com | cut -d"." -f3)
+IPD=$(curl -4 -s icanhazip.com | cut -d"." -f4)
+##
+if [ $IPC == 4 ]
+then
+   tee -a /etc/sysconfig/network-scripts/ifcfg-eth0 <<-EOF
+	IPV6INIT=yes
+	IPV6_AUTOCONF=no
+	IPV6_DEFROUTE=yes
+	IPV6_FAILURE_FATAL=no
+	IPV6_ADDR_GEN_MODE=stable-privacy
+	IPV6ADDR=2403:6a40:0:40::$IPD:0000/64
+	IPV6_DEFAULTGW=2403:6a40:0:40::1
+	EOF
+elif [ $IPC == 5 ]
+then
+   tee -a /etc/sysconfig/network-scripts/ifcfg-eth0 <<-EOF
+	IPV6INIT=yes
+	IPV6_AUTOCONF=no
+	IPV6_DEFROUTE=yes
+	IPV6_FAILURE_FATAL=no
+	IPV6_ADDR_GEN_MODE=stable-privacy
+	IPV6ADDR=2403:6a40:0:41::$IPD:0000/64
+	IPV6_DEFAULTGW=2403:6a40:0:41::1
+	EOF
+elif [ $IPC == 244 ]
+then
+   tee -a /etc/sysconfig/network-scripts/ifcfg-eth0 <<-EOF
+	IPV6INIT=yes
+	IPV6_AUTOCONF=no
+	IPV6_DEFROUTE=yes
+	IPV6_FAILURE_FATAL=no
+	IPV6_ADDR_GEN_MODE=stable-privacy
+	IPV6ADDR=2403:6a40:2000:244::$IPD:0000/64
+	IPV6_DEFAULTGW=2403:6a40:2000:244::1
+	EOF
+else
+	tee -a /etc/sysconfig/network-scripts/ifcfg-eth0 <<-EOF
+	IPV6INIT=yes
+	IPV6_AUTOCONF=no
+	IPV6_DEFROUTE=yes
+	IPV6_FAILURE_FATAL=no
+	IPV6_ADDR_GEN_MODE=stable-privacy
+	IPV6ADDR=2403:6a40:0:$IPC::$IPD:0000/64
+	IPV6_DEFAULTGW=2403:6a40:0:$IPC::1
+	EOF
 fi
 
-# Path to your 3proxy config file
-CONFIG_PATH="/etc/3proxy/.proxy"
+service NetworkManager restart
 
-# Delete old config file
-rm $CONFIG_PATH
-
-# Create the config file and set default settings
-echo "daemon" >> $CONFIG_PATH
-echo "maxconn 2000" >> $CONFIG_PATH
-echo "nserver 8.8.8.8" >> $CONFIG_PATH
-echo "nserver 8.8.4.4" >> $CONFIG_PATH
-echo "nscache 65536" >> $CONFIG_PATH
-echo "timeouts 1 5 30 60 180 1800 15 60" >> $CONFIG_PATH
-
-# Generate the proxies
-for (( i=0; i<NUM_PROXIES; i++ )) 
-do
-  PORT=$((START_PORT + i))
-  USER=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13 ; echo '')
-  PASSWORD=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13 ; echo '')
-  echo "proxy -p$PORT -a -i0.0.0.0 -e0.0.0.0 -u$USER -P$PASSWORD" >> $CONFIG_PATH
-done
-
-# Restart 3proxy
-/etc/init.d/3proxy restart
+fi
+echo 'Da tao IPV6 thanh cong!'
