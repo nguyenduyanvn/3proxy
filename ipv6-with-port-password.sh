@@ -2,7 +2,7 @@
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
 random() {
-	tr </dev/urandom -dc A-Za-z0-9 | head -c5
+	tr </dev/urandom -dc A-Za-z0-9 | head -c12
 	echo
 }
 
@@ -64,7 +64,7 @@ EOF
 
 gen_data() {
     seq $FIRST_PORT $LAST_PORT | while read port; do
-        echo "port$port/$(random)/$IP4/$port/$(gen64 $IP6)"
+        echo "user$port/$(random)/$IP4/$port/$(gen64 $IP6)"
     done
 }
 
@@ -103,9 +103,9 @@ IP6=$(curl -6 -s icanhazip.com | cut -f1-4 -d':')
 echo "Internal ip = ${IP4}. Exteranl sub for ip6 = ${IP6}"
 
 while :; do
-  read -p "Enter FIRST_PORT between 10000 and 60000: " FIRST_PORT
+  read -p "Enter FIRST_PORT between 21000 and 61000: " FIRST_PORT
   [[ $FIRST_PORT =~ ^[0-9]+$ ]] || { echo "Enter a valid number"; continue; }
-  if ((FIRST_PORT >= 10000 && FIRST_PORT <= 60000)); then
+  if ((FIRST_PORT >= 21000 && FIRST_PORT <= 61000)); then
     echo "OK! Valid number"
     break
   else
