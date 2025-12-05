@@ -1,5 +1,5 @@
 #!/bin/bash
-# 3proxy IPv6 – AlmaLinux 8/9 (stable, full features)
+# 3proxy IPv6 – AlmaLinux 8/9 (stable, full features, AUTO IPv6 prefix)
 
 set -euo pipefail
 
@@ -17,7 +17,6 @@ C_RESET="\e[0m"
 C_RED="\e[31m"
 C_GREEN="\e[32m"
 C_YELLOW="\e[33m"
-C_CYAN="\e[36m"
 
 log()   { echo -e "${C_GREEN}[INFO]${C_RESET} $*"; }
 warn()  { echo -e "${C_YELLOW}[WARN]${C_RESET} $*"; }
@@ -224,14 +223,14 @@ main() {
   log "IP detect được:"
   echo "IPv4: ${IP4}"
   echo "IPv6 đầy đủ: ${IP6_RAW}"
-  echo "Gợi ý prefix /64: ${IP6_SUG}"
+  echo "Prefix /64 tự động dùng: ${IP6_SUG}"
   echo
 
-  read -rp "Nhập prefix IPv6 /64 (vd ${IP6_SUG} hoặc prefix khác bạn muốn): " IPV6_PREFIX
-  IPV6_PREFIX=${IPV6_PREFIX:-$IP6_SUG}
+  # *** AUTO PREFIX: không hỏi nữa ***
+  IPV6_PREFIX="${IP6_SUG}"
 
   if ! [[ "${IPV6_PREFIX}" =~ ^[0-9a-fA-F:]+$ ]]; then
-    error "Prefix IPv6 không hợp lệ!"
+    error "Prefix IPv6 không hợp lệ (AUTO detect lỗi)!"
     exit 1
   fi
 
