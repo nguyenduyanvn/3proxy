@@ -13,25 +13,19 @@ gen64() {
 	}
 	echo "$1:$(ip64):$(ip64):$(ip64):$(ip64)"
 }
+
 install_3proxy() {
-    echo "installing 3proxy"
     URL="https://github.com/nguyenduyanvn/3proxy/raw/refs/heads/main/3proxy-0.9.4.tar.gz"
     wget -qO- $URL | bsdtar -xvf-
     cd 3proxy-0.9.4
     make -f Makefile.Linux
     mkdir -p /usr/local/etc/3proxy/{bin,logs,stat}
     cp src/3proxy /usr/local/etc/3proxy/bin/
-    #cp ./scripts/rc.d/proxy.sh /etc/init.d/3proxy
-    #chmod +x /etc/init.d/3proxy
-    #chkconfig 3proxy on
     cd $WORKDIR
 }
-download_proxy() {
-cd /home/cloudfly
-curl -F "file=@proxy.txt" https://file.io
-}
+
 gen_3proxy() {
-    cat <<EOF
+cat <<EOF
 daemon
 maxconn 2000
 nserver 1.1.1.1
@@ -42,25 +36,19 @@ nscache 65536
 timeouts 1 5 30 60 180 1800 15 60
 setgid 65535
 setuid 65535
-stacksize 6291456 
+stacksize 6291456
 flush
 auth strong
 
-users $(awk -F "/" 'BEGIN{ORS="";} {print $1 ":CL:" $2 " "}' ${WORKDATA})
+users $(awk -F "/" '{print $1 ":CL:" $2}' ${WORKDATA})
 
-$(awk -F "/" '{print "auth strong\n" \
-"allow " $1 "\n" \
-"proxy -6 -n -a -p" $4 " -i" $3 " -e"$5"\n" \
-"flush\n"}' ${WORKDATA})
+$(awk -F "/" '{print "allow " $1 "\nproxy -6 -n -a -p" $4 " -i" $3 " -e" $5 "\nflush"}' ${WORKDATA})
 EOF
 }
 
 gen_proxy_file_for_user() {
-    cat >proxy.txt <<EOF
-$(awk -F "/" '{print $3 ":" $4 ":" $1 ":" $2 }' ${WORKDATA})
-EOF
+    awk -F "/" '{print $3 ":" $4 ":" $1 ":" $2 }' ${WORKDATA} > proxy.txt
 }
-
 
 gen_data() {
     seq $FIRST_PORT $LAST_PORT | while read port; do
@@ -69,69 +57,66 @@ gen_data() {
 }
 
 gen_iptables() {
-    cat <<EOF
-    $(awk -F "/" '{print "iptables -I INPUT -p tcp --dport " $4 "  -m state --state NEW -j ACCEPT"}' ${WORKDATA}) 
-EOF
+    awk -F "/" '{print "iptables -I INPUT -p tcp --dport " $4 " -j ACCEPT"}' ${WORKDATA}
 }
 
 gen_ifconfig() {
-    cat <<EOF
-$(awk -F "/" '{print "ifconfig eth0 inet6 add " $5 "/64"}' ${WORKDATA})
-EOF
+    awk -F "/" '{print "ifconfig eth0 inet6 add " $5 "/64"}' ${WORKDATA}
 }
-echo "installing apps"
+
+# --------------------------
+# MAIN START
+# --------------------------
 yum -y install wget gcc net-tools bsdtar zip >/dev/null
 
-cat << EOF > /etc/rc.d/rc.local
-#!/bin/bash
-touch /var/lock/subsys/local
-EOF
-
-echo "installing apps"
-yum -y install wget gcc net-tools bsdtar zip >/dev/null
-
-install_3proxy
-
-echo "working folder = /home/duyanmmo"
 WORKDIR="/home/duyanmmo"
 WORKDATA="${WORKDIR}/data.txt"
-mkdir $WORKDIR && cd $_
+rm -rf $WORKDIR
+mkdir $WORKDIR && cd $WORKDIR
+
+install_3proxy
 
 IP4=$(curl -4 -s icanhazip.com)
 IP6=$(curl -6 -s icanhazip.com | cut -f1-4 -d':')
 
-echo "Internal ip = ${IP4}. Exteranl sub for ip6 = ${IP6}"
+echo "IPv4 = $IP4"
+echo "IPv6 Prefix = $IP6"
 
-while :; do
-  read -p "Enter FIRST_PORT between 21000 and 61000: " FIRST_PORT
-  [[ $FIRST_PORT =~ ^[0-9]+$ ]] || { echo "Enter a valid number"; continue; }
-  if ((FIRST_PORT >= 21000 && FIRST_PORT <= 61000)); then
-    echo "OK! Valid number"
-    break
-  else
-    echo "Number out of range, try again"
-  fi
-done
-LAST_PORT=$(($FIRST_PORT + 1999))
-echo "LAST_PORT is $LAST_PORT. Continue..."
+# =============================
+# XỬ LÝ FIRST_PORT & COUNT
+# =============================
+if [ -z "$FIRST_PORT" ]; then
+    read -p "Enter FIRST_PORT: " FIRST_PORT
+fi
 
-gen_data >$WORKDIR/data.txt
-gen_iptables >$WORKDIR/boot_iptables.sh
-gen_ifconfig >$WORKDIR/boot_ifconfig.sh
-chmod +x boot_*.sh /etc/rc.local
+if [ -z "$COUNT" ]; then
+    COUNT=2000
+fi
 
-gen_3proxy >/usr/local/etc/3proxy/3proxy.cfg
+LAST_PORT=$(($FIRST_PORT + $COUNT - 1))
 
-cat >>/etc/rc.local <<EOF
+echo "Tạo $COUNT proxy từ port $FIRST_PORT → $LAST_PORT"
+
+# =============================
+# GEN FILES
+# =============================
+gen_data > $WORKDIR/data.txt
+gen_iptables > $WORKDIR/boot_iptables.sh
+gen_ifconfig > $WORKDIR/boot_ifconfig.sh
+chmod +x boot_*.sh
+
+gen_3proxy > /usr/local/etc/3proxy/3proxy.cfg
+
+cat <<EOF > /etc/rc.local
 bash ${WORKDIR}/boot_iptables.sh
 bash ${WORKDIR}/boot_ifconfig.sh
-ulimit -n 1000048
+ulimit -n 10048
 /usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg
 EOF
-chmod 0755 /etc/rc.local
+
+chmod +x /etc/rc.local
 bash /etc/rc.local
 
 gen_proxy_file_for_user
 
-echo "Starting Proxy"
-download_proxy
+echo "DONE! Proxy list nằm trong: ${WORKDIR}/proxy.txt"
