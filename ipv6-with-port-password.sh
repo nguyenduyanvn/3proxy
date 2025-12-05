@@ -1,24 +1,19 @@
 #!/bin/bash
-# ===================================================
-# 3PROXY IPV6 PRO MAX - WITH USER/PASS
-# Bản FIX FULL tối ưu cho Almalinux / Rocky / CentOS 8
-# ===================================================
+# ============================
+# 3PROXY FULL FIX FOR ALMALINUX 8 / ROCKY 8
+# WITH USER/PASS
+# ============================
 
 clear
-echo "==> Cài đặt các gói cần thiết..."
+echo "==> Cài dependencies..."
 yum install -y epel-release >/dev/null 2>&1
-yum install -y gcc make wget tar net-tools zip >/dev/null 2>&1
+yum install -y gcc make wget tar net-tools unzip pcre-devel openssl-devel glibc-static >/dev/null 2>&1
 
-# lấy interface
-IFACE=$(ip -o -4 route show to default | awk '{print $5}')
-echo "==> Interface: $IFACE"
+IFACE=$(ip route get 1 | awk '{print $5; exit}')
+echo "Interface: $IFACE"
 
-# lấy IPv4 & IPv6 prefix
 IP4=$(curl -4 -s icanhazip.com)
-IP6=$(curl -6 -s icanhazip.com | cut -f1-7 -d':')
-
-echo "IPv4 = $IP4"
-echo "IPv6 prefix = $IP6"
+IP6PREFIX=$(curl -6 -s icanhazip.com | cut -f1-7 -d ':')
 
 WORKDIR="/home/duyanmmo"
 mkdir -p $WORKDIR
@@ -26,29 +21,22 @@ cd $WORKDIR
 
 FIRST_PORT=$FIRST_PORT
 COUNT=$COUNT
-USERPASS="duyan:123456"  # có thể sửa từ Tool sau này
 LAST_PORT=$((FIRST_PORT + COUNT - 1))
 
-echo "==> Sẽ tạo $COUNT proxy."
+USERPASS="duyan:123456"
 
-# IPv6 random
 hex=(0 1 2 3 4 5 6 7 8 9 a b c d e f)
-gen_ipv6() {
-    echo "${hex[$RANDOM % 16]}${hex[$RANDOM % 16]}${hex[$RANDOM % 16]}${hex[$RANDOM % 16]}"
-}
 
-gen_data() {
-    for ((port=$FIRST_PORT; port<=$LAST_PORT; port++)); do
-        echo "//$IP4/$port/$IP6:$(gen_ipv6)"
-    done
-}
+gen_ipv6(){ printf "%s%s%s%s" "${hex[$RANDOM%16]}" "${hex[$RANDOM%16]}" "${hex[$RANDOM%16]}" "${hex[$RANDOM%16]}" ; }
 
-gen_data > data.txt
+rm -f data.txt
+for ((port=$FIRST_PORT; port<=$LAST_PORT; port++)); do
+    echo "$IP4:$port:$IP6PREFIX:$(gen_ipv6)" >> data.txt
+done
 
 echo "==> Build 3proxy..."
-cd $WORKDIR
-wget -q https://github.com/nguyenduyanvn/3proxy/raw/refs/heads/main/3proxy-0.9.4.tar.gz
-tar -xzf 3proxy-0.9.4.tar.gz
+wget -q https://github.com/3proxy/3proxy/archive/refs/tags/0.9.4.zip
+unzip -q 0.9.4.zip
 cd 3proxy-0.9.4
 make -f Makefile.Linux >/dev/null 2>&1
 
@@ -68,25 +56,32 @@ nserver 8.8.8.8
 
 nscache 65536
 flush
-
-$(awk -F "/" '{print "proxy -6 -n -a -p"$2" -i"$1" -e"$3"\nflush\n"}' OFS="/" data.txt)
 EOF
 
+while IFS=":" read -r IPV4 PORT P6PREFIX RANDSEG; do
+    IPV6="$P6PREFIX:$RANDSEG"
+cat <<EOF >> /usr/local/etc/3proxy/3proxy.cfg
+proxy -6 -n -a -p$PORT -i$IPV4 -e$IPV6
+flush
+EOF
+done < data.txt
+
 echo "==> Add IPv6..."
-awk -F "/" '{print "ip -6 addr add "$3"/64 dev '"$IFACE"'" }' data.txt > boot_ipv6.sh
-bash boot_ipv6.sh
+while IFS=":" read -r IPV4 PORT P6PREFIX RANDSEG; do
+    ip -6 addr add "$P6PREFIX:$RANDSEG/64" dev "$IFACE"
+done < data.txt
 
-echo "==> Mở port firewall..."
-awk -F "/" '{print "iptables -I INPUT -p tcp --dport "$2" -j ACCEPT"}' data.txt > boot_fw.sh
-bash boot_fw.sh
+echo "==> Firewall..."
+while IFS=":" read -r IPV4 PORT P6PREFIX RANDSEG; do
+    iptables -I INPUT -p tcp --dport "$PORT" -j ACCEPT
+done < data.txt
 
-echo "==> Xuất proxy.txt..."
-awk -F "/" '{print $1":"$2":"$USERPASS}' data.txt > proxy.txt
+echo "==> Xuất danh sách..."
+awk -F ":" -v u="$USERPASS" '{print $1":"$2":"u}' data.txt > proxy.txt
 
-echo "==> Start 3proxy..."
+echo "==> START 3proxy..."
 /usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg &
 
-echo "======================================="
-echo " DONE! Proxy list: $WORKDIR/proxy.txt"
-echo " Format: ip:port:user:pass"
-echo "======================================="
+echo "==============================="
+echo " DONE — proxy.txt đã tạo xong!"
+echo "==============================="
