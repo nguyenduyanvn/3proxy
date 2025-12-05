@@ -1,87 +1,90 @@
 #!/bin/bash
-# ============================
-# 3PROXY FULL FIX FOR ALMALINUX 8 / ROCKY 8
-# WITH USER/PASS
-# ============================
+set -e
 
-clear
-echo "==> Cài dependencies..."
-yum install -y epel-release >/dev/null 2>&1
-yum install -y gcc make wget tar net-tools unzip pcre-devel openssl-devel glibc-static >/dev/null 2>&1
-
-IFACE=$(ip route get 1 | awk '{print $5; exit}')
-echo "Interface: $IFACE"
-
-IP4=$(curl -4 -s icanhazip.com)
-IP6PREFIX=$(curl -6 -s icanhazip.com | cut -f1-7 -d ':')
+echo "==> Cài đặt dependencies..."
+yum install -y wget curl unzip iproute iptables-services >/dev/null 2>&1 || true
+apt install -y wget curl unzip iproute2 iptables >/dev/null 2>&1 || true
 
 WORKDIR="/home/duyanmmo"
 mkdir -p $WORKDIR
 cd $WORKDIR
 
-FIRST_PORT=$FIRST_PORT
-COUNT=$COUNT
-LAST_PORT=$((FIRST_PORT + COUNT - 1))
+echo "==> Lấy IPv4 & IPv6 prefix..."
+IP4=$(curl -4 -s icanhazip.com)
+IP6_PREFIX=$(curl -6 -s icanhazip.com | sed 's/:[0-9a-fA-F]\{1,4\}$//')
 
-USERPASS="duyan:123456"
+echo "IPv4 = $IP4"
+echo "IPv6 prefix = $IP6_PREFIX"
 
-hex=(0 1 2 3 4 5 6 7 8 9 a b c d e f)
+echo "==> Tải 3proxy binary..."
+wget -q -O 3proxy_bin.zip "https://raw.githubusercontent.com/duyanmmo/3proxy_binary/main/3proxy_bin.zip"
+unzip -o 3proxy_bin.zip -d 3proxy_bin >/dev/null
 
-gen_ipv6(){ printf "%s%s%s%s" "${hex[$RANDOM%16]}" "${hex[$RANDOM%16]}" "${hex[$RANDOM%16]}" "${hex[$RANDOM%16]}" ; }
+mkdir -p /usr/local/etc/3proxy/bin
+cp 3proxy_bin/3proxy /usr/local/etc/3proxy/bin/
+chmod +x /usr/local/etc/3proxy/bin/3proxy
 
-rm -f data.txt
-for ((port=$FIRST_PORT; port<=$LAST_PORT; port++)); do
-    echo "$IP4:$port:$IP6PREFIX:$(gen_ipv6)" >> data.txt
+echo "==> Tạo danh sách proxy..."
+rm -f data.txt proxy.txt
+
+START_PORT=${FIRST_PORT}
+COUNT=${COUNT}
+USER=${USER}
+PASS=${PASS}
+
+gen_ipv6(){
+    HEX=$(printf "%04x" $(( RANDOM % 65535 )))
+    echo "${IP6_PREFIX}:${HEX}"
+}
+
+for ((i=0; i<$COUNT; i++)); do
+    PORT=$(( START_PORT + i ))
+    IPV6=$(gen_ipv6)
+    echo "$IP4:$PORT/$IPV6" >> data.txt
+    echo "$IP4:$PORT:$USER:$PASS" >> proxy.txt
 done
 
-echo "==> Build 3proxy..."
-wget -q https://github.com/3proxy/3proxy/archive/refs/tags/0.9.4.zip
-unzip -q 0.9.4.zip
-cd 3proxy-0.9.4
-make -f Makefile.Linux >/dev/null 2>&1
+echo "==> Add IPv6 vào interface..."
+IFACE=$(ip route get 1 | awk '{print $5; exit}')
+while read line; do
+    IPV6=$(echo $line | cut -d'/' -f2)
+    ip -6 addr add $IPV6/64 dev $IFACE || true
+done < data.txt
 
-mkdir -p /usr/local/etc/3proxy/{bin,logs,stat}
-cp src/3proxy /usr/local/etc/3proxy/bin/
+echo "==> Mở port firewall..."
+while read line; do
+    PORT=$(echo $line | cut -d'/' -f1 | cut -d':' -f2)
+    iptables -I INPUT -p tcp --dport $PORT -j ACCEPT || true
+done < data.txt
 
-echo "==> Tạo config..."
+echo "==> Tạo config 3proxy..."
 cat <<EOF >/usr/local/etc/3proxy/3proxy.cfg
 daemon
-auth strong
-users $USERPASS
-allow $USERPASS
-maxconn 2000
-
 nserver 1.1.1.1
 nserver 8.8.8.8
-
 nscache 65536
+timeouts 1 5 30 60 180 1800 15 60
+setgid 65535
+setuid 65535
+
+users $USER:CL:$PASS
+auth strong
+
 flush
+
+$(while read line; do
+    IP4=$(echo $line | cut -d'/' -f1 | cut -d':' -f1)
+    PORT=$(echo $line | cut -d'/' -f1 | cut -d':' -f2)
+    IPV6=$(echo $line | cut -d'/' -f2)
+    echo "proxy -6 -n -a -p$PORT -i$IP4 -e$IPV6"
+done < data.txt)
 EOF
 
-while IFS=":" read -r IPV4 PORT P6PREFIX RANDSEG; do
-    IPV6="$P6PREFIX:$RANDSEG"
-cat <<EOF >> /usr/local/etc/3proxy/3proxy.cfg
-proxy -6 -n -a -p$PORT -i$IPV4 -e$IPV6
-flush
-EOF
-done < data.txt
-
-echo "==> Add IPv6..."
-while IFS=":" read -r IPV4 PORT P6PREFIX RANDSEG; do
-    ip -6 addr add "$P6PREFIX:$RANDSEG/64" dev "$IFACE"
-done < data.txt
-
-echo "==> Firewall..."
-while IFS=":" read -r IPV4 PORT P6PREFIX RANDSEG; do
-    iptables -I INPUT -p tcp --dport "$PORT" -j ACCEPT
-done < data.txt
-
-echo "==> Xuất danh sách..."
-awk -F ":" -v u="$USERPASS" '{print $1":"$2":"u}' data.txt > proxy.txt
-
-echo "==> START 3proxy..."
+echo "==> Khởi chạy 3proxy..."
+pkill 3proxy || true
 /usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg &
 
-echo "==============================="
-echo " DONE — proxy.txt đã tạo xong!"
-echo "==============================="
+echo "========================================"
+echo " DONE! Proxy list: $WORKDIR/proxy.txt"
+echo " Format: ip:port:user:pass"
+echo "========================================"
