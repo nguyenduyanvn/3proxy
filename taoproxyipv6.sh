@@ -1,198 +1,175 @@
 #!/bin/bash
 # taoproxyipv6.sh — PRO MAX 3proxy 0.8.6
-# Hỗ trợ:
-#   MODE=nopass  → proxy ip:port
-#   MODE=pass    → proxy ip:port:user:pass
-#   FIRST_PORT, COUNT, USER, PASS
+# Supported MODE:
+#   nopass  → tạo proxy không pass
+#   pass    → tạo proxy có user/pass
+#   delete  → xóa proxy + IPv6 + iptables + config
+#   stop    → dừng 3proxy
+#   restart → restart 3proxy
 
 set -e
-PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-
-# Tăng ulimit riêng cho process này & 3proxy
-ulimit -n 65535 2>/dev/null || true
+ulimit -n 65535 || true
 
 WORKDIR="/home/duyanmmo"
-mkdir -p "$WORKDIR"
+CONFIG="/usr/local/etc/3proxy/3proxy.cfg"
 WORKDATA="$WORKDIR/data.txt"
+IFACE=$(ip route get 1 2>/dev/null | awk '/dev/ {print $5; exit}')
+[ -z "$IFACE" ] && IFACE="eth0"
 
-log() { echo "[*] $*"; }
-ok()  { echo "[+] $*"; }
-err() { echo "[!] $*" >&2; }
+log(){ echo "[*] $*"; }
+ok(){ echo "[+] $*"; }
+err(){ echo "[!] $*" >&2; }
 
-# ================= CÀI GÓI CẦN THIẾT =================
-install_deps() {
-    ok "Cài gcc, make, wget, curl, net-tools..."
-    if command -v yum >/dev/null 2>&1; then
-        yum install -y gcc make wget curl net-tools >/dev/null 2>&1 || true
-    elif command -v dnf >/dev/null 2>&1; then
-        dnf install -y gcc make wget curl net-tools >/dev/null 2>&1 || true
-    elif command -v apt-get >/dev/null 2>&1; then
-        apt-get update -y >/dev/null 2>&1 || true
-        apt-get install -y gcc make wget curl net-tools >/dev/null 2>&1 || true
+# ================= STOP =================
+if [ "$MODE" = "stop" ]; then
+    ok "Stopping 3proxy..."
+    pkill 3proxy 2>/dev/null || true
+    ok "3proxy stopped."
+    exit 0
+fi
+
+# ================= RESTART =================
+if [ "$MODE" = "restart" ]; then
+    ok "Restarting 3proxy..."
+    pkill 3proxy 2>/dev/null || true
+    /usr/local/etc/3proxy/bin/3proxy $CONFIG &
+    sleep 1
+    if pgrep 3proxy >/dev/null; then ok "3proxy restarted!"; else err "Failed."; fi
+    exit 0
+fi
+
+# ================= DELETE =================
+if [ "$MODE" = "delete" ]; then
+    ok "XÓA TOÀN BỘ PROXY + CONFIG + IPv6 + IPTABLES..."
+
+    # Stop proxy
+    pkill 3proxy 2>/dev/null || true
+
+    # Remove config
+    rm -f $CONFIG
+
+    # Remove IPv6
+    ip -6 addr show dev $IFACE | awk '/inet6/ {print $2}' > /tmp/old_ipv6.txt
+    while read ip; do
+        ip -6 addr del "$ip" dev $IFACE 2>/dev/null || true
+    done < /tmp/old_ipv6.txt
+
+    # Clean iptables
+    iptables -F || true
+
+    # Clean files
+    rm -rf $WORKDIR/*
+
+    ok "VPS SẠCH — SẴN SÀNG TẠO PROXY MỚI."
+    exit 0
+fi
+
+# ================= INSTALL DEPENDENCIES =================
+install() {
+    if command -v yum >/dev/null; then
+        yum install -y gcc make wget curl net-tools >/dev/null || true
+    elif command -v dnf >/dev/null; then
+        dnf install -y gcc make wget curl net-tools >/dev/null || true
+    else
+        apt update -y
+        apt install -y gcc make wget curl net-tools
     fi
 }
 
-# ================= CÀI 3PROXY 0.8.6 =================
 install_3proxy() {
     if [ -x /usr/local/etc/3proxy/bin/3proxy ]; then
-        ok "3proxy đã tồn tại, bỏ qua bước build."
+        ok "3proxy đã tồn tại."
         return
     fi
 
-    ok "Tải & build 3proxy 0.8.6..."
+    ok "Tải & build 3proxy..."
     cd /root
-    rm -rf 3proxy-* 3proxy-0.8.6.tar.gz >/dev/null 2>&1 || true
-
     wget -q -O 3proxy-0.8.6.tar.gz "https://github.com/z3APA3A/3proxy/archive/3proxy-0.8.6.tar.gz"
     tar -xzf 3proxy-0.8.6.tar.gz
     cd 3proxy-3proxy-0.8.6
-
     make -f Makefile.Linux >/dev/null
-
     mkdir -p /usr/local/etc/3proxy/{bin,logs,stat}
     cp src/3proxy /usr/local/etc/3proxy/bin/
-    chmod +x /usr/local/etc/3proxy/bin/3proxy
-
-    ok "Cài 3proxy OK."
 }
 
-# ================= RANDOM IPv6 =================
-hex4() {
-    printf "%x%x%x%x" $((RANDOM%16)) $((RANDOM%16)) $((RANDOM%16)) $((RANDOM%16))
-}
+hex4(){ printf "%x%x%x%x" $((RANDOM%16)) $((RANDOM%16)) $((RANDOM%16)) $((RANDOM%16)); }
+gen_ipv6(){ printf "%s:%s:%s:%s:%s\n" "$IP6_PREFIX" "$(hex4)" "$(hex4)" "$(hex4)" "$(hex4)"; }
 
-gen_ipv6() {
-    printf "%s:%s:%s:%s:%s\n" "$IP6_PREFIX" "$(hex4)" "$(hex4)" "$(hex4)" "$(hex4)"
-}
-
-# ================= SINH DATA =================
 gen_data() {
-    ok "Sinh danh sách proxy..."
-    : > "$WORKDATA"
-    port="$FIRST_PORT"
-    while [ "$port" -le "$LAST_PORT" ]; do
+    :> $WORKDATA
+    p=$FIRST_PORT
+    while [ $p -le $LAST_PORT ]; do
         ip6=$(gen_ipv6)
-        # Lưu dạng: IPv4/port/IPv6
-        echo "$IP4/$port/$ip6" >> "$WORKDATA"
-        port=$((port+1))
+        echo "$IP4/$p/$ip6" >> $WORKDATA
+        p=$((p+1))
     done
-    ok "Đã sinh $(wc -l < "$WORKDATA") proxy."
 }
 
-# ================= TẠO CONFIG 3PROXY =================
 gen_config() {
-    ok "Tạo /usr/local/etc/3proxy/3proxy.cfg ..."
-
-    CONFIG="/usr/local/etc/3proxy/3proxy.cfg"
-    cat >"$CONFIG" <<EOF
+cat > $CONFIG <<EOF
 daemon
 maxconn 2000
-nserver 1.1.1.1
-nserver 8.8.8.8
-nserver 2001:4860:4860::8888
-nserver 2001:4860:4860::8844
-nscache 65536
-timeouts 1 5 30 60 180 1800 15 60
-setgid 65535
-setuid 65535
+auth none
+allow *
 flush
 EOF
 
-    if [ "$MODE" = "pass" ]; then
-        # Cấu hình auth
-        cat >>"$CONFIG" <<EOF
+if [ "$MODE" = "pass" ]; then
+cat >> $CONFIG <<EOF
 users $USER:CL:$PASS
 auth strong
 allow $USER
 EOF
-    else
-        # Không pass
-        echo "auth none" >>"$CONFIG"
-        echo "allow *" >>"$CONFIG"
-    fi
+fi
 
-    # 0.8.6 không hỗ trợ -6, chỉ dùng -n -a -p -i -e
-    while IFS=/ read -r ip4 port ip6; do
-        echo "proxy -n -a -p$port -i$ip4 -e$ip6" >>"$CONFIG"
-        echo "flush" >>"$CONFIG"
-    done < "$WORKDATA"
-
-    ok "Config OK."
+while IFS="/" read ip4 port ip6; do
+cat >> $CONFIG <<EOF
+proxy -n -a -p$port -i$ip4 -e$ip6
+flush
+EOF
+done < $WORKDATA
 }
 
-# ================= FIREWALL & IPv6 =================
-apply_fw_and_ipv6() {
-    ok "Thêm IPv6 vào interface $IFACE..."
-    while IFS=/ read -r ip4 port ip6; do
-        ip -6 addr add "$ip6/64" dev "$IFACE" 2>/dev/null || true
-    done < "$WORKDATA"
+apply_ipv6() {
+    while IFS="/" read ip4 port ip6; do
+        ip -6 addr add "$ip6/64" dev $IFACE 2>/dev/null || true
+    done < $WORKDATA
+}
 
-    ok "Mở port firewall..."
-    for p in $(seq "$FIRST_PORT" "$LAST_PORT"); do
-        iptables -I INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || true
+apply_fw() {
+    for p in $(seq $FIRST_PORT $LAST_PORT); do
+        iptables -I INPUT -p tcp --dport $p -j ACCEPT
     done
 }
 
-# ================= START 3PROXY =================
-start_3proxy() {
-    ok "Restart 3proxy..."
-    pkill 3proxy 2>/dev/null || true
-    /usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg &
-    sleep 1
-    if pgrep 3proxy >/dev/null 2>&1; then
-        ok "3proxy đang chạy."
-    else
-        err "3proxy KHÔNG chạy, kiểm tra lại config."
-    fi
+run_3proxy() {
+    pkill 3proxy || true
+    /usr/local/etc/3proxy/bin/3proxy $CONFIG &
 }
 
-# ================= LƯU proxy.txt =================
-save_proxy_list() {
-    PROXYTXT="$WORKDIR/proxy.txt"
-    if [ "$MODE" = "pass" ]; then
-        awk -F'/' -v U="$USER" -v P="$PASS" '{print $1 ":" $2 ":" U ":" P}' "$WORKDATA" > "$PROXYTXT"
-    else
-        awk -F'/' '{print $1 ":" $2}' "$WORKDATA" > "$PROXYTXT"
-    fi
-    ok "Đã tạo $PROXYTXT"
-}
-
-# ================= MAIN =================
-echo "==== TẠO PROXY IPV6 – 3PROXY 0.8.6 – MODE=$MODE ===="
-
-MODE=${MODE:-nopass}
-FIRST_PORT=${FIRST_PORT:-20000}
-COUNT=${COUNT:-100}
-LAST_PORT=$((FIRST_PORT + COUNT - 1))
-
-install_deps
+# ================= MAIN CREATE MODE =================
+install
 install_3proxy
 
-IFACE=$(ip route get 1 2>/dev/null | awk '/dev/ {print $5; exit}')
-[ -z "$IFACE" ] && IFACE="eth0"
+mkdir -p $WORKDIR
+IP4=$(curl -s -4 icanhazip.com)
+IP6F=$(curl -s -6 icanhazip.com)
+IP6_PREFIX=$(echo $IP6F | cut -d: -f1-4)
 
-IP4=$(curl -4 -s icanhazip.com || echo "")
-IP6_FULL=$(curl -6 -s icanhazip.com || echo "")
-
-if [ -z "$IP4" ] || [ -z "$IP6_FULL" ]; then
-    err "Không lấy được IPv4 hoặc IPv6 (curl icanhazip.com)."
-    exit 1
-fi
-
-IP6_PREFIX=$(echo "$IP6_FULL" | cut -d':' -f1-4)
-
-ok "Interface: $IFACE"
-ok "IPv4: $IP4"
-ok "IPv6 full: $IP6_FULL"
-ok "IPv6 prefix: $IP6_PREFIX"
-ok "Sẽ tạo $COUNT proxy từ port $FIRST_PORT → $LAST_PORT"
-
-rm -f "$WORKDATA" "$WORKDIR/proxy.txt" 2>/dev/null || true
+FIRST_PORT=${FIRST_PORT:-20000}
+COUNT=${COUNT:-100}
+LAST_PORT=$((FIRST_PORT+COUNT-1))
 
 gen_data
 gen_config
-apply_fw_and_ipv6
-start_3proxy
-save_proxy_list
+apply_ipv6
+apply_fw
+run_3proxy
 
-echo "===== HOÀN TẤT ====="
+if [ "$MODE" = "pass" ]; then
+    awk -F'/' -v U="$USER" -v P="$PASS" '{print $1 ":" $2 ":" U ":" P}' $WORKDATA > $WORKDIR/proxy.txt
+else
+    awk -F'/' '{print $1 ":" $2}' $WORKDATA > $WORKDIR/proxy.txt
+fi
+
+ok "HOÀN TẤT. File proxy: $WORKDIR/proxy.txt"
